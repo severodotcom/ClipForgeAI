@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: clipforge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clipforge
+      POSTGRES_PASSWORD: clipforge_dev_password
+      POSTGRES_DB: clipforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - clipforge_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  clipforge_postgres_data:
