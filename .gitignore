@@ -47,4 +47,6 @@ next-env.d.ts
 
 # AI/editor tooling config
 /.agents/
+/.claude/
+/.windsurf/
 skills-lock.json
