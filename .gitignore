@@ -44,3 +44,7 @@ next-env.d.ts
 
 # local video storage (dev)
 /storage/
+
+# AI/editor tooling config
+/.agents/
+skills-lock.json
