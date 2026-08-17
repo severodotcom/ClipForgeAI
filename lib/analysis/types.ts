@@ -16,6 +16,8 @@ export type ClipSuggestion = {
   endTime: number;
   title: string;
   reason: string;
+  /** 0-100, higher means a stronger candidate. Callers must not assume an
+   * analyzer already clamped this — see sanitizeSuggestions. */
   score: number;
 };
 

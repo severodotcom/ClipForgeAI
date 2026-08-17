@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getOwnedVideo } from "@/lib/ownership";
-import { getClipAnalyzer, type TranscriptSegment } from "@/lib/analysis";
+import { analyzeTranscript, type TranscriptSegment } from "@/lib/analysis";
 import { headers } from "next/headers";
 
 export async function POST(
@@ -41,14 +41,21 @@ export async function POST(
     );
   }
 
-  const analyzer = getClipAnalyzer();
+  try {
+    const result = await analyzeTranscript({
+      videoId,
+      duration: video.duration,
+      text: transcription.text,
+      segments: transcription.segments as unknown as TranscriptSegment[],
+    });
 
-  const suggestions = await analyzer.analyze({
-    videoId,
-    duration: video.duration,
-    text: transcription.text,
-    segments: transcription.segments as unknown as TranscriptSegment[],
-  });
+    return Response.json(result);
+  } catch (error) {
+    console.error(`Falha ao gerar sugestões para o vídeo ${videoId}:`, error);
 
-  return Response.json({ analyzer: analyzer.name, suggestions });
+    return Response.json(
+      { error: "Falha ao gerar sugestões" },
+      { status: 502 }
+    );
+  }
 }

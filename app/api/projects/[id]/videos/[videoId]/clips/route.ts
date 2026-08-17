@@ -37,7 +37,7 @@ export async function POST(
   const reason = typeof body.reason === "string" ? body.reason.trim() : null;
   const score =
     typeof body.score === "number" && Number.isFinite(body.score)
-      ? body.score
+      ? Math.min(100, Math.max(0, body.score))
       : null;
 
   if (
@@ -48,6 +48,13 @@ export async function POST(
   ) {
     return Response.json(
       { error: "Intervalo de tempo inválido" },
+      { status: 400 }
+    );
+  }
+
+  if (video.duration != null && endTime > video.duration) {
+    return Response.json(
+      { error: "O fim do clipe não pode ultrapassar a duração do vídeo" },
       { status: 400 }
     );
   }

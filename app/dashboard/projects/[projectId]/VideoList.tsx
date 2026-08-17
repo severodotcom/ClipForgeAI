@@ -301,7 +301,7 @@ function VideoCard({
                     <p className="text-xs text-gray-500">
                       {formatTime(suggestion.startTime)} –{" "}
                       {formatTime(suggestion.endTime)} · score{" "}
-                      {suggestion.score.toFixed(2)}
+                      {Math.round(suggestion.score)}/100
                     </p>
 
                     <p className="text-xs text-gray-500">{suggestion.reason}</p>
@@ -343,7 +343,7 @@ function VideoCard({
 
             {hasValidSelection && suggestedMeta && (
               <p className="text-xs text-gray-400">
-                Baseado em sugestão (score {suggestedMeta.score.toFixed(2)}):{" "}
+                Baseado em sugestão (score {Math.round(suggestedMeta.score)}/100):{" "}
                 {suggestedMeta.reason}
               </p>
             )}
@@ -448,7 +448,7 @@ function VideoCard({
 
                     {clip.reason && (
                       <p className="text-xs text-gray-400">
-                        {clip.score != null && `Score ${clip.score.toFixed(2)} · `}
+                        {clip.score != null && `Score ${Math.round(clip.score)}/100 · `}
                         {clip.reason}
                       </p>
                     )}

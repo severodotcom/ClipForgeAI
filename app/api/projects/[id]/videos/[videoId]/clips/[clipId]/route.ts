@@ -64,6 +64,13 @@ export async function PATCH(
       );
     }
 
+    if (clip.video.duration != null && endTime > clip.video.duration) {
+      return Response.json(
+        { error: "O fim do clipe não pode ultrapassar a duração do vídeo" },
+        { status: 400 }
+      );
+    }
+
     data.startTime = startTime;
     data.endTime = endTime;
     data.status = "PENDING";

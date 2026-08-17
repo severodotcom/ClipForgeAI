@@ -58,14 +58,14 @@ function scoreAndExplain(text: string, wordCount: number, durationSeconds: numbe
   const keywordScore = Math.min(keywordHits / 3, 1);
   const punctuationScore = Math.min(punctuationHits / 2, 1);
 
-  const score =
-    Math.round(
-      (lengthScore * 0.35 +
-        keywordScore * 0.35 +
-        punctuationScore * 0.15 +
-        durationFit * 0.15) *
-        100
-    ) / 100;
+  // Score is on a 0-100 scale (not 0-1), matching ClipSuggestion's contract.
+  const score = Math.round(
+    (lengthScore * 0.35 +
+      keywordScore * 0.35 +
+      punctuationScore * 0.15 +
+      durationFit * 0.15) *
+      100
+  );
 
   const reasonParts = [`${wordCount} palavra(s) em ${durationSeconds.toFixed(0)}s`];
   if (keywordHits > 0) reasonParts.push(`${keywordHits} termo(s) de destaque`);
