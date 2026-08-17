@@ -22,6 +22,7 @@ function hasPendingWork(videos: VideoWithRelations[]) {
   return videos.some(
     (video) =>
       POLLING_VIDEO_STATUSES.includes(video.status) ||
+      (video.status === "UPLOADED" && !video.transcription) ||
       video.clips.some((clip) => POLLING_CLIP_STATUSES.includes(clip.status))
   );
 }
@@ -49,6 +50,10 @@ export function VideoList({
   useEffect(() => {
     videosRef.current = videos;
   }, [videos]);
+
+  useEffect(() => {
+    setVideos(initialVideos);
+  }, [initialVideos]);
 
   useEffect(() => {
     const interval = setInterval(async () => {
