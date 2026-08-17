@@ -4,6 +4,9 @@ import { generateClip } from "@/lib/clips";
 import { getOwnedVideo } from "@/lib/ownership";
 import { headers } from "next/headers";
 
+const MAX_TITLE_LENGTH = 200;
+const MAX_REASON_LENGTH = 500;
+
 export async function POST(
   request: Request,
   { params }: RouteContext<"/api/projects/[id]/videos/[videoId]/clips">
@@ -33,8 +36,14 @@ export async function POST(
   const body = await request.json();
   const startTime = Number(body.startTime);
   const endTime = Number(body.endTime);
-  const title = typeof body.title === "string" ? body.title.trim() : null;
-  const reason = typeof body.reason === "string" ? body.reason.trim() : null;
+  const title =
+    typeof body.title === "string"
+      ? body.title.trim().slice(0, MAX_TITLE_LENGTH)
+      : null;
+  const reason =
+    typeof body.reason === "string"
+      ? body.reason.trim().slice(0, MAX_REASON_LENGTH)
+      : null;
   const score =
     typeof body.score === "number" && Number.isFinite(body.score)
       ? Math.min(100, Math.max(0, body.score))

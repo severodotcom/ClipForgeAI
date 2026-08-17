@@ -6,6 +6,8 @@ import { getClipAbsolutePath } from "@/lib/storage";
 import { getOwnedClip } from "@/lib/ownership";
 import { headers } from "next/headers";
 
+const MAX_TITLE_LENGTH = 200;
+
 export async function PATCH(
   request: Request,
   { params }: RouteContext<"/api/projects/[id]/videos/[videoId]/clips/[clipId]">
@@ -42,7 +44,7 @@ export async function PATCH(
   } = {};
 
   if (typeof body.title === "string") {
-    data.title = body.title.trim() || null;
+    data.title = body.title.trim().slice(0, MAX_TITLE_LENGTH) || null;
   }
 
   const wantsNewRange =

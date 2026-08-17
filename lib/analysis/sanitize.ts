@@ -6,6 +6,18 @@ const MAX_OVERLAP_RATIO = 0.5;
 const MAX_RETURNED_SUGGESTIONS = 8;
 const FALLBACK_TITLE = "Trecho sugerido";
 const FALLBACK_REASON = "Sem justificativa fornecida pelo analisador.";
+const MIN_SUGGESTION_DURATION_SECONDS = 1;
+const MAX_SUGGESTION_DURATION_SECONDS = 10 * 60;
+const MAX_TITLE_LENGTH = 200;
+const MAX_REASON_LENGTH = 500;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function truncate(text: string, maxLength: number) {
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
 
 function isValidSegment(segment: unknown): segment is TranscriptSegment {
   if (!segment || typeof segment !== "object") return false;
@@ -49,15 +61,23 @@ function overlapRatio(a: ClipSuggestion, b: ClipSuggestion) {
 
 /**
  * Validates and repairs raw ClipAnalyzer output before it ever reaches the
- * client or gets persisted as a Clip: clamps score to 0-100, drops
- * suggestions with invalid/degenerate time ranges, clamps endTime to the
- * video's known duration, falls back title/reason to a safe default instead
- * of allowing empty strings, and suppresses suggestions that overlap too
- * much with a higher-scored one already accepted. This runs identically for
- * every provider — an analyzer only needs to propose candidates.
+ * client or gets persisted as a Clip. The input is treated as fully
+ * untrusted (typed `unknown`, not `ClipSuggestion[]`) because a real
+ * provider's output crosses a runtime boundary (parsed JSON from an LLM
+ * response) where TypeScript's compile-time types offer no guarantee: it
+ * might not even be an array, and its elements might not be objects at all.
+ *
+ * Repairs/enforces: input must be an array of objects; startTime/endTime
+ * must be finite numbers with endTime > startTime; endTime is clamped to
+ * the video's known duration; suggestion duration is clamped to at most 10
+ * minutes and dropped if under 1 second; score is clamped to 0-100; title
+ * and reason fall back to a safe default instead of being empty, and are
+ * length-capped; and suggestions overlapping >50% with a higher-scored one
+ * already accepted are suppressed. This runs identically for every
+ * provider — an analyzer only needs to propose candidates.
  */
 export function sanitizeSuggestions(
-  rawSuggestions: ClipSuggestion[],
+  rawSuggestions: unknown,
   transcript: TranscriptInput
 ): ClipSuggestion[] {
   const duration =
@@ -65,8 +85,22 @@ export function sanitizeSuggestions(
       ? transcript.duration
       : null;
 
+  if (!Array.isArray(rawSuggestions)) {
+    console.warn(
+      `sanitizeSuggestions: analyzer output was not an array (got ${typeof rawSuggestions}), discarding.`
+    );
+    return [];
+  }
+
   const cleaned = rawSuggestions
-    .map((suggestion): ClipSuggestion | null => {
+    .map((raw): ClipSuggestion | null => {
+      if (!isPlainObject(raw)) {
+        console.warn("sanitizeSuggestions: dropped a non-object suggestion entry.");
+        return null;
+      }
+
+      const suggestion = raw as Partial<ClipSuggestion>;
+
       if (
         typeof suggestion.startTime !== "number" ||
         !Number.isFinite(suggestion.startTime) ||
@@ -82,7 +116,7 @@ export function sanitizeSuggestions(
         return null;
       }
 
-      const endTime =
+      let endTime =
         duration != null && duration > 0
           ? Math.min(suggestion.endTime, duration)
           : suggestion.endTime;
@@ -90,6 +124,12 @@ export function sanitizeSuggestions(
       if (endTime <= suggestion.startTime) {
         return null;
       }
+
+      if (endTime - suggestion.startTime < MIN_SUGGESTION_DURATION_SECONDS) {
+        return null;
+      }
+
+      endTime = Math.min(endTime, suggestion.startTime + MAX_SUGGESTION_DURATION_SECONDS);
 
       const score = Math.min(
         MAX_SCORE,
@@ -101,14 +141,18 @@ export function sanitizeSuggestions(
         )
       );
 
-      const title =
+      const title = truncate(
         typeof suggestion.title === "string" && suggestion.title.trim()
           ? suggestion.title.trim()
-          : FALLBACK_TITLE;
-      const reason =
+          : FALLBACK_TITLE,
+        MAX_TITLE_LENGTH
+      );
+      const reason = truncate(
         typeof suggestion.reason === "string" && suggestion.reason.trim()
           ? suggestion.reason.trim()
-          : FALLBACK_REASON;
+          : FALLBACK_REASON,
+        MAX_REASON_LENGTH
+      );
 
       return { startTime: suggestion.startTime, endTime, title, reason, score };
     })

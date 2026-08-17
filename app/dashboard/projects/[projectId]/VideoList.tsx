@@ -66,6 +66,7 @@ function VideoCard({
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState("");
   const [suggestionsFetched, setSuggestionsFetched] = useState(false);
+  const [suggestionsAnalyzer, setSuggestionsAnalyzer] = useState("");
 
   const segments = (video.transcription?.segments ?? []) as unknown as TranscriptSegment[];
   const hasValidSelection =
@@ -106,6 +107,7 @@ function VideoCard({
       }
 
       setSuggestions(data.suggestions);
+      setSuggestionsAnalyzer(data.analyzer || "");
       setSuggestionsFetched(true);
     } finally {
       setLoadingSuggestions(false);
@@ -273,7 +275,7 @@ function VideoCard({
                 onClick={handleSuggest}
                 className="rounded border px-2 py-1 disabled:opacity-40"
               >
-                {loadingSuggestions ? "Analisando..." : "Sugerir clipes (mock)"}
+                {loadingSuggestions ? "Analisando..." : "Sugerir clipes automaticamente"}
               </button>
             </div>
 
@@ -290,8 +292,8 @@ function VideoCard({
             {suggestions.length > 0 && (
               <div className="space-y-2 rounded border p-2">
                 <p className="text-xs text-gray-400">
-                  Sugestões geradas por heurística local (mock, sem chamadas
-                  externas) — revise antes de criar o clipe.
+                  Sugestões geradas por &quot;{suggestionsAnalyzer || "analisador"}&quot;
+                  — revise antes de criar o clipe.
                 </p>
 
                 {suggestions.map((suggestion, index) => (
