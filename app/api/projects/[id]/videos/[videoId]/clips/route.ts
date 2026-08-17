@@ -1,28 +1,8 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateClip } from "@/lib/clips";
+import { getOwnedVideo } from "@/lib/ownership";
 import { headers } from "next/headers";
-
-async function getOwnedVideo(
-  projectId: string,
-  videoId: string,
-  userId: string
-) {
-  const video = await prisma.video.findUnique({
-    where: { id: videoId },
-    include: { project: true },
-  });
-
-  if (
-    !video ||
-    video.projectId !== projectId ||
-    video.project.userId !== userId
-  ) {
-    return null;
-  }
-
-  return video;
-}
 
 export async function POST(
   request: Request,
