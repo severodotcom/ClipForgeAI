@@ -34,6 +34,11 @@ export async function POST(
   const startTime = Number(body.startTime);
   const endTime = Number(body.endTime);
   const title = typeof body.title === "string" ? body.title.trim() : null;
+  const reason = typeof body.reason === "string" ? body.reason.trim() : null;
+  const score =
+    typeof body.score === "number" && Number.isFinite(body.score)
+      ? body.score
+      : null;
 
   if (
     !Number.isFinite(startTime) ||
@@ -53,6 +58,8 @@ export async function POST(
       startTime,
       endTime,
       title: title || null,
+      reason: reason || null,
+      score,
       status: "PENDING",
     },
   });

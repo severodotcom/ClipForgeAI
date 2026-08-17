@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Clip, ClipStatus, Transcription, Video, VideoStatus } from "@prisma/client";
 import { CLIP_STATUS_LABELS, VIDEO_STATUS_LABELS } from "@/lib/video-status";
+import type { ClipSuggestion } from "@/lib/analysis";
 
 type VideoWithRelations = Video & {
   transcription: Transcription | null;
@@ -58,6 +59,13 @@ function VideoCard({
   const [editValues, setEditValues] = useState({ title: "", start: "", end: "" });
   const [savingClipId, setSavingClipId] = useState<string | null>(null);
   const [deletingClipId, setDeletingClipId] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<ClipSuggestion[]>([]);
+  const [suggestedMeta, setSuggestedMeta] = useState<{ reason: string; score: number } | null>(
+    null
+  );
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState("");
+  const [suggestionsFetched, setSuggestionsFetched] = useState(false);
 
   const segments = (video.transcription?.segments ?? []) as unknown as TranscriptSegment[];
   const hasValidSelection =
@@ -72,11 +80,43 @@ function VideoCard({
   function markStart() {
     if (!videoRef.current) return;
     setSelection((s) => ({ ...s, start: videoRef.current!.currentTime }));
+    setSuggestedMeta(null);
   }
 
   function markEnd() {
     if (!videoRef.current) return;
     setSelection((s) => ({ ...s, end: videoRef.current!.currentTime }));
+    setSuggestedMeta(null);
+  }
+
+  async function handleSuggest() {
+    setLoadingSuggestions(true);
+    setSuggestionsError("");
+
+    try {
+      const response = await fetch(
+        `/api/projects/${projectId}/videos/${video.id}/suggestions`,
+        { method: "POST" }
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        setSuggestionsError(data.error || "Erro ao gerar sugestões.");
+        return;
+      }
+
+      setSuggestions(data.suggestions);
+      setSuggestionsFetched(true);
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  }
+
+  function useSuggestion(suggestion: ClipSuggestion) {
+    seekTo(suggestion.startTime);
+    setSelection({ start: suggestion.startTime, end: suggestion.endTime });
+    setTitle(suggestion.title);
+    setSuggestedMeta({ reason: suggestion.reason, score: suggestion.score });
   }
 
   function handlePreview() {
@@ -113,6 +153,7 @@ function VideoCard({
             startTime: selection.start,
             endTime: selection.end,
             title,
+            ...(suggestedMeta ?? {}),
           }),
         }
       );
@@ -121,6 +162,7 @@ function VideoCard({
         onClipCreated(video.id, await response.json());
         setSelection({ start: null, end: null });
         setTitle("");
+        setSuggestedMeta(null);
       }
     } finally {
       setCreating(false);
@@ -227,6 +269,58 @@ function VideoCard({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
+                disabled={loadingSuggestions}
+                onClick={handleSuggest}
+                className="rounded border px-2 py-1 disabled:opacity-40"
+              >
+                {loadingSuggestions ? "Analisando..." : "Sugerir clipes (mock)"}
+              </button>
+            </div>
+
+            {suggestionsError && (
+              <p className="text-red-600">{suggestionsError}</p>
+            )}
+
+            {suggestionsFetched && suggestions.length === 0 && !suggestionsError && (
+              <p className="text-xs text-gray-400">
+                Nenhuma sugestão encontrada para este vídeo.
+              </p>
+            )}
+
+            {suggestions.length > 0 && (
+              <div className="space-y-2 rounded border p-2">
+                <p className="text-xs text-gray-400">
+                  Sugestões geradas por heurística local (mock, sem chamadas
+                  externas) — revise antes de criar o clipe.
+                </p>
+
+                {suggestions.map((suggestion, index) => (
+                  <div key={index} className="rounded border p-2">
+                    <p className="font-medium">{suggestion.title}</p>
+
+                    <p className="text-xs text-gray-500">
+                      {formatTime(suggestion.startTime)} –{" "}
+                      {formatTime(suggestion.endTime)} · score{" "}
+                      {suggestion.score.toFixed(2)}
+                    </p>
+
+                    <p className="text-xs text-gray-500">{suggestion.reason}</p>
+
+                    <button
+                      type="button"
+                      onClick={() => useSuggestion(suggestion)}
+                      className="mt-1 rounded border px-2 py-1 text-xs"
+                    >
+                      Usar esta sugestão
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
                 onClick={markStart}
                 className="rounded border px-2 py-1"
               >
@@ -246,6 +340,13 @@ function VideoCard({
                 {selection.end != null ? formatTime(selection.end) : "--:--"}
               </span>
             </div>
+
+            {hasValidSelection && suggestedMeta && (
+              <p className="text-xs text-gray-400">
+                Baseado em sugestão (score {suggestedMeta.score.toFixed(2)}):{" "}
+                {suggestedMeta.reason}
+              </p>
+            )}
 
             {hasValidSelection && (
               <div className="flex flex-wrap items-center gap-2">
@@ -336,13 +437,22 @@ function VideoCard({
                 </div>
               ) : (
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-gray-600">
-                    {clip.title ? `${clip.title} · ` : ""}
-                    {formatTime(clip.startTime)} – {formatTime(clip.endTime)}{" "}
-                    <span className="text-gray-400">
-                      ({CLIP_STATUS_LABELS[clip.status]})
+                  <div>
+                    <span className="text-gray-600">
+                      {clip.title ? `${clip.title} · ` : ""}
+                      {formatTime(clip.startTime)} – {formatTime(clip.endTime)}{" "}
+                      <span className="text-gray-400">
+                        ({CLIP_STATUS_LABELS[clip.status]})
+                      </span>
                     </span>
-                  </span>
+
+                    {clip.reason && (
+                      <p className="text-xs text-gray-400">
+                        {clip.score != null && `Score ${clip.score.toFixed(2)} · `}
+                        {clip.reason}
+                      </p>
+                    )}
+                  </div>
 
                   <div className="flex items-center gap-3">
                     {clip.status === "COMPLETED" && (
