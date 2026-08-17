@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import path from "node:path";
 
 const VIDEO_STORAGE_ROOT = path.join(process.cwd(), "storage", "videos");
+const CLIP_STORAGE_ROOT = path.join(process.cwd(), "storage", "clips");
 
 function sanitizeFilename(filename: string) {
   return filename.replace(/[^a-zA-Z0-9.\-_]/g, "_");
@@ -31,4 +32,32 @@ export async function saveVideoFile({
   );
 
   return path.join(projectId, safeName);
+}
+
+export function getVideoAbsolutePath(storagePath: string) {
+  return path.join(VIDEO_STORAGE_ROOT, storagePath);
+}
+
+export async function prepareClipOutputPath({
+  projectId,
+  videoId,
+  clipId,
+}: {
+  projectId: string;
+  videoId: string;
+  clipId: string;
+}) {
+  const dir = path.join(CLIP_STORAGE_ROOT, projectId, videoId);
+  await mkdir(dir, { recursive: true });
+
+  const relativePath = path.join(projectId, videoId, `${clipId}.mp4`);
+
+  return {
+    relativePath,
+    absolutePath: path.join(CLIP_STORAGE_ROOT, relativePath),
+  };
+}
+
+export function getClipAbsolutePath(storagePath: string) {
+  return path.join(CLIP_STORAGE_ROOT, storagePath);
 }

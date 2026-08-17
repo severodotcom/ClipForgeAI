@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { saveVideoFile } from "@/lib/storage";
+import { transcribeVideo } from "@/lib/transcription";
 import { headers } from "next/headers";
 
 const MAX_VIDEO_SIZE_BYTES = 2 * 1024 * 1024 * 1024;
@@ -90,6 +91,10 @@ export async function POST(
       },
     });
 
+    transcribeVideo(updatedVideo.id).catch((error) => {
+      console.error(`Falha ao iniciar transcrição do vídeo ${updatedVideo.id}:`, error);
+    });
+
     return Response.json(updatedVideo, { status: 201 });
   } catch {
     await prisma.video.update({
@@ -133,6 +138,10 @@ export async function GET(
   const videos = await prisma.video.findMany({
     where: { projectId },
     orderBy: { createdAt: "desc" },
+    include: {
+      transcription: true,
+      clips: { orderBy: { createdAt: "desc" } },
+    },
   });
 
   return Response.json(videos);

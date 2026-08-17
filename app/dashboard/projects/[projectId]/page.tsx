@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { UploadVideoForm } from "./UploadVideoForm";
+import { VideoList } from "./VideoList";
 
 export default async function ProjectPage({
   params,
@@ -23,6 +24,10 @@ export default async function ProjectPage({
     include: {
       videos: {
         orderBy: { createdAt: "desc" },
+        include: {
+          transcription: true,
+          clips: { orderBy: { createdAt: "desc" } },
+        },
       },
     },
   });
@@ -55,34 +60,7 @@ export default async function ProjectPage({
 
           <UploadVideoForm projectId={project.id} />
 
-          {project.videos.length === 0 ? (
-            <div className="mt-4 rounded-xl border border-dashed bg-white p-10 text-center">
-              <p className="text-gray-600">
-                Este projeto ainda não possui vídeos.
-              </p>
-
-              <p className="mt-2 text-sm text-gray-400">
-                Envie seu primeiro vídeo para começar.
-              </p>
-            </div>
-          ) : (
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {project.videos.map((video) => (
-                <div
-                  key={video.id}
-                  className="rounded-xl bg-white p-6 shadow"
-                >
-                  <h3 className="font-semibold">
-                    {video.originalFilename}
-                  </h3>
-
-                  <p className="mt-2 text-sm text-gray-500">
-                    {video.status}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
+          <VideoList projectId={project.id} initialVideos={project.videos} />
         </section>
       </div>
     </main>

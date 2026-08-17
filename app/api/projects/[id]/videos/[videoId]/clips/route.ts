@@ -1,0 +1,85 @@
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { generateClip } from "@/lib/clips";
+import { headers } from "next/headers";
+
+async function getOwnedVideo(
+  projectId: string,
+  videoId: string,
+  userId: string
+) {
+  const video = await prisma.video.findUnique({
+    where: { id: videoId },
+    include: { project: true },
+  });
+
+  if (
+    !video ||
+    video.projectId !== projectId ||
+    video.project.userId !== userId
+  ) {
+    return null;
+  }
+
+  return video;
+}
+
+export async function POST(
+  request: Request,
+  { params }: RouteContext<"/api/projects/[id]/videos/[videoId]/clips">
+) {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
+  if (!session) {
+    return Response.json(
+      { error: "Não autenticado" },
+      { status: 401 }
+    );
+  }
+
+  const { id: projectId, videoId } = await params;
+
+  const video = await getOwnedVideo(projectId, videoId, session.user.id);
+
+  if (!video) {
+    return Response.json(
+      { error: "Vídeo não encontrado" },
+      { status: 404 }
+    );
+  }
+
+  const body = await request.json();
+  const startTime = Number(body.startTime);
+  const endTime = Number(body.endTime);
+  const title = typeof body.title === "string" ? body.title.trim() : null;
+
+  if (
+    !Number.isFinite(startTime) ||
+    !Number.isFinite(endTime) ||
+    startTime < 0 ||
+    endTime <= startTime
+  ) {
+    return Response.json(
+      { error: "Intervalo de tempo inválido" },
+      { status: 400 }
+    );
+  }
+
+  const clip = await prisma.clip.create({
+    data: {
+      videoId,
+      startTime,
+      endTime,
+      title: title || null,
+      status: "PENDING",
+    },
+  });
+
+  generateClip(clip.id).catch((error) => {
+    console.error(`Falha ao iniciar geração do clipe ${clip.id}:`, error);
+  });
+
+  return Response.json(clip, { status: 201 });
+}
