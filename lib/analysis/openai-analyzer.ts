@@ -1,6 +1,11 @@
 import OpenAI from "openai";
 import type { ClipAnalyzer, ClipSuggestion, TranscriptInput } from "./types";
-import { computeTranscriptHash, getCachedAnalysis, saveAnalysisCache } from "./cache";
+import {
+  computeTranscriptHash,
+  getCachedAnalysis,
+  saveAnalysisCache,
+  type AnalysisCacheKey,
+} from "./cache";
 
 const DEFAULT_MODEL_ENV_HINT = "OPENAI_MODEL";
 
@@ -166,25 +171,24 @@ export function mapUsage(usage: OpenAI.CompletionUsage | null | undefined): Open
   };
 }
 
+export type CacheLookupResult =
+  | { hit: true; suggestions: ClipSuggestion[]; analysisCacheId: string }
+  | { hit: false; cacheKey: AnalysisCacheKey };
+
 /**
- * Does the actual OpenAI call (unless a cached result already exists for
- * this exact transcript content + model + prompt version, in which case no
- * network call happens at all) and returns the suggestions, the token usage
- * for *this* call (zeroed out on a cache hit, since no call occurred), and
- * whether it was a cache hit. `openAiAnalyzer.analyze` (the ClipAnalyzer
- * implementation) wraps this and discards `usage`/`cacheHit` so the
- * existing ClipAnalyzer contract (Promise<ClipSuggestion[]>) is untouched —
- * callers that need usage/cache info (future cost tracking) can call this
- * directly instead.
+ * Network-free cache lookup — computes the cache key and checks Postgres,
+ * nothing else. Safe to call before any quota check: on a hit, the caller
+ * can return immediately without ever touching quota logic or the OpenAI
+ * client. On a miss, returns the `cacheKey` so a subsequent call to
+ * `runOpenAiAnalysis` doesn't need to recompute the transcript hash.
  */
-export async function analyzeWithUsage(
+export async function peekCachedSuggestions(
   transcript: TranscriptInput
-): Promise<{ suggestions: ClipSuggestion[]; usage: OpenAiUsage | null; cacheHit: boolean }> {
+): Promise<CacheLookupResult> {
   const model = getModel();
-  const transcriptHash = computeTranscriptHash(transcript);
-  const cacheKey = {
+  const cacheKey: AnalysisCacheKey = {
     videoId: transcript.videoId,
-    transcriptHash,
+    transcriptHash: computeTranscriptHash(transcript),
     model,
     analyzerVersion: ANALYZER_VERSION,
   };
@@ -193,22 +197,35 @@ export async function analyzeWithUsage(
 
   if (cached) {
     console.log(
-      `[openai-analyzer] cache hit — video=${transcript.videoId} model=${model} version=${ANALYZER_VERSION} usage: prompt_tokens=0 completion_tokens=0 total_tokens=0`
+      `[openai-analyzer] cache hit — video=${transcript.videoId} model=${model} version=${ANALYZER_VERSION} analysisCacheId=${cached.id}`
     );
 
-    return {
-      suggestions: cached,
-      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-      cacheHit: true,
-    };
+    return { hit: true, suggestions: cached.suggestions, analysisCacheId: cached.id };
   }
 
+  return { hit: false, cacheKey };
+}
+
+/**
+ * Does the actual OpenAI call and persists the result. Must only be called
+ * after confirming a cache miss (via `peekCachedSuggestions`) — this
+ * function has no concept of quota/users by design; a caller that needs to
+ * enforce a usage limit must check it *between* the two calls, using the
+ * gap this split creates. Never wrap this call in a Postgres transaction:
+ * a network call to an external API (observed at 4-6s in this project) has
+ * no place holding a DB row lock — see suggestions/route.ts for how the
+ * quota check around this call is deliberately lock-free.
+ */
+export async function runOpenAiAnalysis(
+  transcript: TranscriptInput,
+  cacheKey: AnalysisCacheKey
+): Promise<{ suggestions: ClipSuggestion[]; usage: OpenAiUsage | null; analysisCacheId: string }> {
   const client = getClient();
 
   let completion;
   try {
     completion = await client.chat.completions.create({
-      model,
+      model: cacheKey.model,
       temperature: 0.3,
       response_format: { type: "json_object" },
       messages: [
@@ -223,15 +240,51 @@ export async function analyzeWithUsage(
 
   const usage = mapUsage(completion.usage);
   console.log(
-    `[openai-analyzer] cache miss — video=${transcript.videoId} model=${model} version=${ANALYZER_VERSION} usage: prompt_tokens=${usage?.promptTokens ?? "?"} completion_tokens=${usage?.completionTokens ?? "?"} total_tokens=${usage?.totalTokens ?? "?"}`
+    `[openai-analyzer] cache miss — video=${transcript.videoId} model=${cacheKey.model} version=${cacheKey.analyzerVersion} usage: prompt_tokens=${usage?.promptTokens ?? "?"} completion_tokens=${usage?.completionTokens ?? "?"} total_tokens=${usage?.totalTokens ?? "?"}`
   );
 
   const rawContent = completion.choices[0]?.message?.content;
   const suggestions = parseOpenAiResponse(rawContent);
 
-  await saveAnalysisCache(cacheKey, suggestions, usage);
+  // Persisted *before* returning: analysisCacheId (used by the caller to
+  // build the AI_ANALYSIS idempotencyKey) only exists once this succeeds.
+  // If this throws, the caller never reaches usage accounting — by
+  // construction, not by a separate guard.
+  const saved = await saveAnalysisCache(cacheKey, suggestions, usage);
 
-  return { suggestions, usage, cacheHit: false };
+  return { suggestions, usage, analysisCacheId: saved.id };
+}
+
+/**
+ * Convenience orchestration of the two functions above, for callers that
+ * just want a suggestion list plus metadata without needing to check quota
+ * in between (e.g. `analyze()` below, or any standalone/test usage). Not
+ * used by the quota-aware path in suggestions/route.ts, which calls
+ * `peekCachedSuggestions`/`runOpenAiAnalysis` directly so it can check
+ * quota strictly between a confirmed miss and the real network call.
+ */
+export async function analyzeWithUsage(
+  transcript: TranscriptInput
+): Promise<{
+  suggestions: ClipSuggestion[];
+  usage: OpenAiUsage | null;
+  cacheHit: boolean;
+  analysisCacheId: string;
+}> {
+  const lookup = await peekCachedSuggestions(transcript);
+
+  if (lookup.hit) {
+    return {
+      suggestions: lookup.suggestions,
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      cacheHit: true,
+      analysisCacheId: lookup.analysisCacheId,
+    };
+  }
+
+  const result = await runOpenAiAnalysis(transcript, lookup.cacheKey);
+
+  return { ...result, cacheHit: false };
 }
 
 export const openAiAnalyzer: ClipAnalyzer = {

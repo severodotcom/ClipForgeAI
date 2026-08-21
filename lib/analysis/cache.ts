@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
+import type { AnalysisCache } from "@prisma/client";
 import type { ClipSuggestion, TranscriptInput } from "./types";
 
 export type CachedUsage = {
@@ -40,9 +41,21 @@ export type AnalysisCacheKey = {
   analyzerVersion: string;
 };
 
+export type CachedAnalysis = {
+  id: string;
+  suggestions: ClipSuggestion[];
+};
+
+/**
+ * Returns the cached row's id along with its suggestions (not just the
+ * suggestions) — callers need the id to build an idempotencyKey for
+ * AI_ANALYSIS usage accounting (see lib/usage.ts and openai-analyzer.ts),
+ * tied to *this specific cache entry* rather than the video alone (a video
+ * can have multiple AnalysisCache rows over time — see saveAnalysisCache).
+ */
 export async function getCachedAnalysis(
   key: AnalysisCacheKey
-): Promise<ClipSuggestion[] | null> {
+): Promise<CachedAnalysis | null> {
   const row = await prisma.analysisCache.findUnique({
     where: {
       videoId_transcriptHash_model_analyzerVersion: key,
@@ -51,7 +64,7 @@ export async function getCachedAnalysis(
 
   if (!row) return null;
 
-  return row.suggestions as unknown as ClipSuggestion[];
+  return { id: row.id, suggestions: row.suggestions as unknown as ClipSuggestion[] };
 }
 
 /**
@@ -63,13 +76,19 @@ export async function getCachedAnalysis(
  * version can still hit cache instead of always recomputing.
  *
  * Uses upsert (not create) so two concurrent cache-miss requests for the
- * same key don't race into a unique-constraint error.
+ * same key don't race into a unique-constraint error — both resolve to the
+ * SAME row (same `id`), which is exactly what AI_ANALYSIS usage accounting
+ * relies on to collapse a concurrent double-analysis into a single
+ * UsageRecord (see openai-analyzer.ts / suggestions/route.ts).
+ *
+ * Returns the persisted row so callers can read its `id` (needed for the
+ * AI_ANALYSIS idempotencyKey) without a second query.
  */
 export async function saveAnalysisCache(
   key: AnalysisCacheKey,
   suggestions: ClipSuggestion[],
   usage: CachedUsage | null
-): Promise<void> {
+): Promise<AnalysisCache> {
   const data = {
     suggestions: suggestions as unknown as object,
     promptTokens: usage?.promptTokens ?? null,
@@ -77,7 +96,7 @@ export async function saveAnalysisCache(
     totalTokens: usage?.totalTokens ?? null,
   };
 
-  await prisma.analysisCache.upsert({
+  const saved = await prisma.analysisCache.upsert({
     where: {
       videoId_transcriptHash_model_analyzerVersion: key,
     },
@@ -93,6 +112,8 @@ export async function saveAnalysisCache(
       transcriptHash: { not: key.transcriptHash },
     },
   });
+
+  return saved;
 }
 
 /** Explicit invalidation for future use (e.g. a re-transcribe flow) — not

@@ -43,3 +43,29 @@ export interface ClipAnalyzer {
   readonly name: string;
   analyze(transcript: TranscriptInput): Promise<ClipSuggestion[]>;
 }
+
+/** Provider-agnostic token usage shape — deliberately not the OpenAI SDK's
+ * own usage type, so this file has no dependency on any specific LLM SDK. */
+export type TokenUsage = {
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+};
+
+/**
+ * Enriched analysis result exposed by lib/analysis/index.ts on top of the
+ * plain ClipAnalyzer contract — cache/cost metadata a caller needs to
+ * enforce usage quotas (see lib/usage.ts). Deliberately NOT part of the
+ * ClipAnalyzer interface: a provider without caching/cost concepts (mock)
+ * never needs to produce this shape itself — index.ts fills in
+ * cacheHit: false, usage: null, analysisCacheId: null for any provider
+ * that doesn't supply richer data. Only the openai provider currently
+ * supplies real values for usage/analysisCacheId.
+ */
+export type AnalysisResult = {
+  analyzer: string;
+  suggestions: ClipSuggestion[];
+  cacheHit: boolean;
+  usage: TokenUsage | null;
+  analysisCacheId: string | null;
+};
