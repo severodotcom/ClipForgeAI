@@ -5,7 +5,7 @@ import path from "node:path";
 import { WaveFile } from "wavefile";
 import { prisma } from "@/lib/prisma";
 import { getWhisperPipeline } from "@/lib/whisper";
-import { getAudioDuration, extractAudioWav } from "@/lib/ffmpeg";
+import { extractAudioWav } from "@/lib/ffmpeg";
 import { getVideoAbsolutePath } from "@/lib/storage";
 
 type TranscriptSegment = {
@@ -19,12 +19,24 @@ type TranscriptChunk = {
   text: string;
 };
 
+/**
+ * Assumes video.duration is already known and persisted — the caller
+ * (POST /api/projects/[id]/videos) determines duration via ffprobe and
+ * checks the TRANSCRIPTION_MINUTES quota *before* ever invoking this
+ * function, so transcription never starts (and no minutes are ever spent
+ * inside here) for a video that doesn't fit the user's remaining quota.
+ * This function no longer probes duration itself or records usage — both
+ * already happened at the call site, inside the same locked transaction
+ * that decided it was safe to proceed.
+ */
 export async function transcribeVideo(videoId: string) {
   const video = await prisma.video.findUnique({ where: { id: videoId } });
 
-  if (!video || !video.storagePath) {
+  if (!video || !video.storagePath || video.duration == null) {
     return;
   }
+
+  const duration = video.duration;
 
   await prisma.video.update({
     where: { id: videoId },
@@ -36,7 +48,6 @@ export async function transcribeVideo(videoId: string) {
   const wavPath = path.join(workDir, "audio.wav");
 
   try {
-    const duration = await getAudioDuration(inputPath);
     await extractAudioWav(inputPath, wavPath);
 
     const wav = new WaveFile(readFileSync(wavPath));
@@ -80,7 +91,7 @@ export async function transcribeVideo(videoId: string) {
 
     await prisma.video.update({
       where: { id: videoId },
-      data: { duration, status: "UPLOADED" },
+      data: { status: "UPLOADED" },
     });
   } catch (error) {
     console.error(`Falha ao transcrever vídeo ${videoId}:`, error);

@@ -1,7 +1,16 @@
 import OpenAI from "openai";
 import type { ClipAnalyzer, ClipSuggestion, TranscriptInput } from "./types";
+import { computeTranscriptHash, getCachedAnalysis, saveAnalysisCache } from "./cache";
 
 const DEFAULT_MODEL_ENV_HINT = "OPENAI_MODEL";
+
+/**
+ * Bump whenever buildSystemPrompt/buildUserPrompt change in a way that
+ * could change the model's output for the same transcript — this is part
+ * of the AnalysisCache lookup key (see cache.ts), so a stale prompt version
+ * never serves suggestions produced by an older prompt.
+ */
+const ANALYZER_VERSION = "openai-suggestions-v1";
 
 /**
  * Server-only provider: reads OPENAI_API_KEY via the OpenAI SDK's default
@@ -135,30 +144,101 @@ export function parseOpenAiResponse(rawContent: string | null | undefined): Clip
   });
 }
 
+export type OpenAiUsage = {
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+};
+
+/**
+ * Maps the OpenAI SDK's `completion.usage` (absent on some responses, e.g.
+ * certain error/streaming paths) into our own shape. Kept as a pure
+ * function, mirroring parseOpenAiResponse, so it can be unit-tested without
+ * a network call.
+ */
+export function mapUsage(usage: OpenAI.CompletionUsage | null | undefined): OpenAiUsage | null {
+  if (!usage) return null;
+
+  return {
+    promptTokens: usage.prompt_tokens ?? null,
+    completionTokens: usage.completion_tokens ?? null,
+    totalTokens: usage.total_tokens ?? null,
+  };
+}
+
+/**
+ * Does the actual OpenAI call (unless a cached result already exists for
+ * this exact transcript content + model + prompt version, in which case no
+ * network call happens at all) and returns the suggestions, the token usage
+ * for *this* call (zeroed out on a cache hit, since no call occurred), and
+ * whether it was a cache hit. `openAiAnalyzer.analyze` (the ClipAnalyzer
+ * implementation) wraps this and discards `usage`/`cacheHit` so the
+ * existing ClipAnalyzer contract (Promise<ClipSuggestion[]>) is untouched —
+ * callers that need usage/cache info (future cost tracking) can call this
+ * directly instead.
+ */
+export async function analyzeWithUsage(
+  transcript: TranscriptInput
+): Promise<{ suggestions: ClipSuggestion[]; usage: OpenAiUsage | null; cacheHit: boolean }> {
+  const model = getModel();
+  const transcriptHash = computeTranscriptHash(transcript);
+  const cacheKey = {
+    videoId: transcript.videoId,
+    transcriptHash,
+    model,
+    analyzerVersion: ANALYZER_VERSION,
+  };
+
+  const cached = await getCachedAnalysis(cacheKey);
+
+  if (cached) {
+    console.log(
+      `[openai-analyzer] cache hit — video=${transcript.videoId} model=${model} version=${ANALYZER_VERSION} usage: prompt_tokens=0 completion_tokens=0 total_tokens=0`
+    );
+
+    return {
+      suggestions: cached,
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      cacheHit: true,
+    };
+  }
+
+  const client = getClient();
+
+  let completion;
+  try {
+    completion = await client.chat.completions.create({
+      model,
+      temperature: 0.3,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: buildSystemPrompt() },
+        { role: "user", content: buildUserPrompt(transcript) },
+      ],
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Falha ao chamar a API da OpenAI: ${message}`);
+  }
+
+  const usage = mapUsage(completion.usage);
+  console.log(
+    `[openai-analyzer] cache miss — video=${transcript.videoId} model=${model} version=${ANALYZER_VERSION} usage: prompt_tokens=${usage?.promptTokens ?? "?"} completion_tokens=${usage?.completionTokens ?? "?"} total_tokens=${usage?.totalTokens ?? "?"}`
+  );
+
+  const rawContent = completion.choices[0]?.message?.content;
+  const suggestions = parseOpenAiResponse(rawContent);
+
+  await saveAnalysisCache(cacheKey, suggestions, usage);
+
+  return { suggestions, usage, cacheHit: false };
+}
+
 export const openAiAnalyzer: ClipAnalyzer = {
   name: "openai",
 
   async analyze(transcript: TranscriptInput): Promise<ClipSuggestion[]> {
-    const client = getClient();
-    const model = getModel();
-
-    let completion;
-    try {
-      completion = await client.chat.completions.create({
-        model,
-        temperature: 0.3,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: buildSystemPrompt() },
-          { role: "user", content: buildUserPrompt(transcript) },
-        ],
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Falha ao chamar a API da OpenAI: ${message}`);
-    }
-
-    const rawContent = completion.choices[0]?.message?.content;
-    return parseOpenAiResponse(rawContent);
+    const { suggestions } = await analyzeWithUsage(transcript);
+    return suggestions;
   },
 };

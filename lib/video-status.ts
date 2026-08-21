@@ -8,6 +8,7 @@ export const VIDEO_STATUS_LABELS: Record<VideoStatus, string> = {
   GENERATING: "Gerando clipes...",
   COMPLETED: "Concluído",
   FAILED: "Falhou",
+  QUOTA_EXCEEDED: "Limite de minutos do plano atingido neste período",
 };
 
 export const CLIP_STATUS_LABELS: Record<ClipStatus, string> = {

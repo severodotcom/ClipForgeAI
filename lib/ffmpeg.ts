@@ -38,7 +38,15 @@ export async function getAudioDuration(inputPath: string) {
     inputPath,
   ]);
 
-  return parseFloat(stdout.trim());
+  const duration = parseFloat(stdout.trim());
+
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error(
+      `Não foi possível determinar a duração do vídeo (ffprobe retornou "${stdout.trim()}").`
+    );
+  }
+
+  return duration;
 }
 
 export async function extractAudioWav(inputPath: string, outputPath: string) {

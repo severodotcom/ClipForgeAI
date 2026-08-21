@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseOpenAiResponse } from "./openai-analyzer";
+import { mapUsage, parseOpenAiResponse } from "./openai-analyzer";
 
 describe("parseOpenAiResponse", () => {
   it("converte um JSON válido em ClipSuggestion[]", () => {
@@ -141,5 +141,18 @@ describe("parseOpenAiResponse", () => {
         JSON.stringify({ suggestions: [valid, { ...valid, title: "" }, valid] })
       )
     ).toThrow("Sugestão #1 da OpenAI tem title inválido.");
+  });
+});
+
+describe("mapUsage", () => {
+  it("converte completion.usage em OpenAiUsage", () => {
+    expect(
+      mapUsage({ prompt_tokens: 120, completion_tokens: 45, total_tokens: 165 })
+    ).toEqual({ promptTokens: 120, completionTokens: 45, totalTokens: 165 });
+  });
+
+  it("retorna null quando usage está ausente", () => {
+    expect(mapUsage(null)).toBeNull();
+    expect(mapUsage(undefined)).toBeNull();
   });
 });
