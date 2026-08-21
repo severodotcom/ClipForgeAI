@@ -1,11 +1,13 @@
 import type { ClipAnalyzer, ClipSuggestion, TranscriptInput } from "./types";
 import { mockAnalyzer } from "./mock-analyzer";
+import { openAiAnalyzer } from "./openai-analyzer";
 import { sanitizeSuggestions, sanitizeTranscript } from "./sanitize";
 
 const DEFAULT_ANALYZER = "mock";
 
 const ANALYZERS: Record<string, ClipAnalyzer> = {
   mock: mockAnalyzer,
+  openai: openAiAnalyzer,
 };
 
 export function getClipAnalyzer(): ClipAnalyzer {
