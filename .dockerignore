@@ -1,0 +1,35 @@
+# Secrets — never sent to the build context.
+.env
+.env.*
+!.env.example
+
+# Dev-only local data.
+/storage/
+
+# VCS / editor / agent tooling.
+.git
+.gitignore
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
+
+# Dependencies and build output — reinstalled/rebuilt inside the image.
+node_modules
+.next/
+out/
+build/
+coverage/
+
+# Docker itself.
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Misc.
+*.log
+npm-debug.log*
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+README.md
