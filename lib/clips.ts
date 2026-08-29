@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { clipSemaphore } from "@/lib/concurrency";
 import { extractClip } from "@/lib/ffmpeg";
 import { getVideoAbsolutePath, prepareClipOutputPath } from "@/lib/storage";
 
@@ -25,7 +26,12 @@ export async function generateClip(clipId: string) {
       clipId: clip.id,
     });
 
-    await extractClip(inputPath, absolutePath, clip.startTime, clip.endTime);
+    // clipSemaphore.run só chama extractClip (o ffmpeg pesado) depois de
+    // garantir que nenhuma outra geração de clipe está rodando neste
+    // processo — ver lib/concurrency.ts.
+    await clipSemaphore.run(() =>
+      extractClip(inputPath, absolutePath, clip.startTime, clip.endTime)
+    );
 
     await prisma.clip.update({
       where: { id: clipId },

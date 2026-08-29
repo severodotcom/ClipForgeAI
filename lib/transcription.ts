@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { WaveFile } from "wavefile";
 import { prisma } from "@/lib/prisma";
+import { whisperSemaphore } from "@/lib/concurrency";
 import { getWhisperPipeline } from "@/lib/whisper";
 import { extractAudioWav } from "@/lib/ffmpeg";
 import { getVideoAbsolutePath } from "@/lib/storage";
@@ -94,14 +95,20 @@ export async function transcribeVideo(videoId: string) {
     }
 
     const transcriber = await getWhisperPipeline();
-    const output = await withTimeout(
-      transcriber(audioData, {
-        chunk_length_s: 30,
-        stride_length_s: 5,
-        return_timestamps: true,
-      }),
-      WHISPER_TIMEOUT_MS,
-      `Transcrição excedeu o tempo limite de ${WHISPER_TIMEOUT_MS}ms`
+    // whisperSemaphore.run só invoca esta função (e portanto só chama
+    // `transcriber(...)`, disparando a inferência real) depois de garantir
+    // que nenhuma outra transcrição está rodando neste processo — ver
+    // lib/concurrency.ts.
+    const output = await whisperSemaphore.run(() =>
+      withTimeout(
+        transcriber(audioData, {
+          chunk_length_s: 30,
+          stride_length_s: 5,
+          return_timestamps: true,
+        }),
+        WHISPER_TIMEOUT_MS,
+        `Transcrição excedeu o tempo limite de ${WHISPER_TIMEOUT_MS}ms`
+      )
     );
 
     const result = Array.isArray(output) ? output[0] : output;
