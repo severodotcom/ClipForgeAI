@@ -37,12 +37,14 @@ function formatTime(seconds: number) {
 function VideoCard({
   projectId,
   video,
+  onVideoUpdated,
   onClipCreated,
   onClipUpdated,
   onClipDeleted,
 }: {
   projectId: string;
   video: VideoWithRelations;
+  onVideoUpdated: (video: Video) => void;
   onClipCreated: (videoId: string, clip: Clip) => void;
   onClipUpdated: (videoId: string, clip: Clip) => void;
   onClipDeleted: (videoId: string, clipId: string) => void;
@@ -67,6 +69,8 @@ function VideoCard({
   const [suggestionsError, setSuggestionsError] = useState("");
   const [suggestionsFetched, setSuggestionsFetched] = useState(false);
   const [suggestionsAnalyzer, setSuggestionsAnalyzer] = useState("");
+  const [retryingVideo, setRetryingVideo] = useState(false);
+  const [retryingClipId, setRetryingClipId] = useState<string | null>(null);
 
   const segments = (video.transcription?.segments ?? []) as unknown as TranscriptSegment[];
   const hasValidSelection =
@@ -111,6 +115,46 @@ function VideoCard({
       setSuggestionsFetched(true);
     } finally {
       setLoadingSuggestions(false);
+    }
+  }
+
+  async function handleRetryVideo() {
+    setRetryingVideo(true);
+
+    try {
+      const response = await fetch(
+        `/api/projects/${projectId}/videos/${video.id}/retry`,
+        { method: "POST" }
+      );
+      const data = await response.json();
+
+      if (response.ok) {
+        onVideoUpdated(data);
+      } else {
+        window.alert(data.error || "Não foi possível repetir o processamento deste vídeo.");
+      }
+    } finally {
+      setRetryingVideo(false);
+    }
+  }
+
+  async function handleRetryClip(clipId: string) {
+    setRetryingClipId(clipId);
+
+    try {
+      const response = await fetch(
+        `/api/projects/${projectId}/videos/${video.id}/clips/${clipId}/retry`,
+        { method: "POST" }
+      );
+      const data = await response.json();
+
+      if (response.ok) {
+        onClipUpdated(video.id, data);
+      } else {
+        window.alert(data.error || "Não foi possível repetir a geração deste clipe.");
+      }
+    } finally {
+      setRetryingClipId(null);
     }
   }
 
@@ -229,8 +273,19 @@ function VideoCard({
     <div className="rounded-xl bg-white p-6 shadow">
       <h3 className="font-semibold">{video.originalFilename}</h3>
 
-      <p className="mt-2 text-sm text-gray-500">
+      <p className="mt-2 flex items-center gap-2 text-sm text-gray-500">
         {VIDEO_STATUS_LABELS[video.status]}
+
+        {video.status === "FAILED" && (
+          <button
+            type="button"
+            disabled={retryingVideo}
+            onClick={handleRetryVideo}
+            className="rounded border px-2 py-0.5 text-xs text-gray-700 disabled:opacity-40"
+          >
+            {retryingVideo ? "Repetindo..." : "Tentar novamente"}
+          </button>
+        )}
       </p>
 
       {video.storagePath && (
@@ -280,7 +335,17 @@ function VideoCard({
             </div>
 
             {suggestionsError && (
-              <p className="text-red-600">{suggestionsError}</p>
+              <p className="flex items-center gap-2 text-red-600">
+                {suggestionsError}
+                <button
+                  type="button"
+                  disabled={loadingSuggestions}
+                  onClick={handleSuggest}
+                  className="rounded border px-2 py-0.5 text-xs text-gray-700 disabled:opacity-40"
+                >
+                  Tentar novamente
+                </button>
+              </p>
             )}
 
             {suggestionsFetched && suggestions.length === 0 && !suggestionsError && (
@@ -466,6 +531,17 @@ function VideoCard({
                       </a>
                     )}
 
+                    {clip.status === "FAILED" && (
+                      <button
+                        type="button"
+                        disabled={retryingClipId === clip.id}
+                        onClick={() => handleRetryClip(clip.id)}
+                        className="text-gray-600 hover:underline disabled:opacity-40"
+                      >
+                        {retryingClipId === clip.id ? "Repetindo..." : "Tentar novamente"}
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => startEditing(clip)}
@@ -527,6 +603,14 @@ export function VideoList({
     return () => clearInterval(interval);
   }, [projectId]);
 
+  function handleVideoUpdated(updated: Video) {
+    setVideos((prev) =>
+      prev.map((video) =>
+        video.id === updated.id ? { ...video, ...updated } : video
+      )
+    );
+  }
+
   function handleClipCreated(videoId: string, clip: Clip) {
     setVideos((prev) =>
       prev.map((video) =>
@@ -581,6 +665,7 @@ export function VideoList({
           key={video.id}
           projectId={projectId}
           video={video}
+          onVideoUpdated={handleVideoUpdated}
           onClipCreated={handleClipCreated}
           onClipUpdated={handleClipUpdated}
           onClipDeleted={handleClipDeleted}

@@ -87,6 +87,7 @@ model Video {
   duration         Float?
   status           VideoStatus @default(UPLOADING)
   createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 
   project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   transcription Transcription?
@@ -115,6 +116,7 @@ model Clip {
   status     ClipStatus @default(PENDING)
   outputPath String?
   createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
 
   video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
 }

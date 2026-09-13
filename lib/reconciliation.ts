@@ -8,18 +8,22 @@ import { prisma } from "@/lib/prisma";
 // (WHISPER_TIMEOUT_MS em lib/transcription.ts, FFMPEG_TIMEOUT_MS em
 // lib/ffmpeg.ts) ter tido a chance de marcar a linha como FAILED sozinho.
 //
-// Critério de stale: Video e Clip não têm coluna updatedAt (só createdAt),
-// então usamos createdAt como aproximação de "quando esse processamento
-// começou" — na prática o status muda para TRANSCRIBING/GENERATING/
-// ANALYZING poucos segundos depois da criação da linha, dentro da mesma
-// request de upload/criação de clipe. RECONCILE_STALE_AFTER_MS fica bem
-// acima da soma dos timeouts internos mais uma margem para espera na fila
-// dos semáforos de concorrência (lib/concurrency.ts, no máximo 1
-// transcrição e 1 geração de clipe simultânea) — suficiente para não
-// marcar como FAILED uma operação que só está esperando sua vez na fila ou
-// ainda dentro do seu timeout normal. Se a fila ficar tipicamente mais
-// funda que isso, o próximo passo é trocar createdAt por uma coluna
-// updatedAt dedicada; fora do escopo desta etapa.
+// Critério de stale: usa Video.updatedAt/Clip.updatedAt (coluna @updatedAt,
+// atualizada automaticamente pelo Prisma em todo update/updateMany) como
+// "quando essa linha foi tocada pela última vez" — não createdAt. Isso
+// importa especificamente para retry manual (ver lib/retry.ts): um retry
+// transiciona a linha de volta para um status "em andamento" via
+// updateMany, o que já bate o updatedAt para agora. Se a checagem de
+// staleness ainda usasse createdAt, um vídeo/clipe antigo que acabou de ser
+// retried (mas cujo createdAt original já passou de RECONCILE_STALE_AFTER_MS)
+// seria marcado FAILED de novo no próximo boot, mesmo tendo acabado de
+// começar a reprocessar — bug real encontrado ao desenhar o retry, não
+// apenas hipotético. RECONCILE_STALE_AFTER_MS fica bem acima da soma dos
+// timeouts internos mais uma margem para espera na fila dos semáforos de
+// concorrência (lib/concurrency.ts, no máximo 1 transcrição e 1 geração de
+// clipe simultânea) — suficiente para não marcar como FAILED uma operação
+// que só está esperando sua vez na fila ou ainda dentro do seu timeout
+// normal.
 //
 // Válido só para uma instância de processo — não coordena nada entre
 // processos/instâncias (não há lock distribuído). Não tenta re-executar a
@@ -50,14 +54,14 @@ export async function reconcileStuckOperations(now: Date = new Date()): Promise<
     prisma.video.updateMany({
       where: {
         status: { in: STUCK_VIDEO_STATUSES },
-        createdAt: { lt: staleBefore },
+        updatedAt: { lt: staleBefore },
       },
       data: { status: "FAILED" },
     }),
     prisma.clip.updateMany({
       where: {
         status: { in: STUCK_CLIP_STATUSES },
-        createdAt: { lt: staleBefore },
+        updatedAt: { lt: staleBefore },
       },
       data: { status: "FAILED" },
     }),
