@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { generateClip } from "@/lib/clips";
 import { getOwnedVideo } from "@/lib/ownership";
 import { checkQuota, getPeriodStart, lockUserForQuota, recordUsage, type QuotaCheckResult } from "@/lib/usage";
+import { checkRateLimit, rateLimitKey, rateLimitResponse, RATE_LIMIT_RULES } from "@/lib/rate-limit";
 import { UsageType } from "@prisma/client";
 import { headers } from "next/headers";
 
@@ -34,6 +35,18 @@ export async function POST(
       { error: "Não autenticado" },
       { status: 401 }
     );
+  }
+
+  // P2a: rate limit compartilhado com o PATCH de clips/[clipId] que
+  // reprocessa via ffmpeg (mesma chave "clip-generation") — criar e
+  // regenerar um clipe custam o mesmo, então dividem o mesmo orçamento.
+  const rateDecision = checkRateLimit(
+    rateLimitKey("clip-generation", session.user.id),
+    RATE_LIMIT_RULES.CLIP_GENERATION
+  );
+
+  if (!rateDecision.allowed) {
+    return rateLimitResponse(rateDecision);
   }
 
   const { id: projectId, videoId } = await params;

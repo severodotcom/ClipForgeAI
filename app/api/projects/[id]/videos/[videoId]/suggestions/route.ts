@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getOwnedVideo } from "@/lib/ownership";
 import { peekCache, runAnalysis, type TranscriptSegment } from "@/lib/analysis";
 import { checkQuota, getPeriodStart, recordUsage } from "@/lib/usage";
+import { checkRateLimit, rateLimitKey, rateLimitResponse, RATE_LIMIT_RULES } from "@/lib/rate-limit";
 import { UsageType } from "@prisma/client";
 import { headers } from "next/headers";
 
@@ -19,6 +20,18 @@ export async function POST(
       { error: "Não autenticado" },
       { status: 401 }
     );
+  }
+
+  // P2a: rate limit antes de ownership/query/quota — inclusive antes do
+  // peekCache, que já é "network-free e cost-free" mas ainda assim é uma
+  // query no banco.
+  const rateDecision = checkRateLimit(
+    rateLimitKey("ai-suggestions", session.user.id),
+    RATE_LIMIT_RULES.AI_SUGGESTIONS
+  );
+
+  if (!rateDecision.allowed) {
+    return rateLimitResponse(rateDecision);
   }
 
   const { id: projectId, videoId } = await params;

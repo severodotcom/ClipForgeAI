@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { generateClip } from "@/lib/clips";
 import { getClipAbsolutePath } from "@/lib/storage";
 import { getOwnedClip } from "@/lib/ownership";
+import { checkRateLimit, rateLimitKey, rateLimitResponse, RATE_LIMIT_RULES } from "@/lib/rate-limit";
 import { headers } from "next/headers";
 
 const MAX_TITLE_LENGTH = 200;
@@ -24,6 +25,25 @@ export async function PATCH(
   }
 
   const { id: projectId, videoId, clipId } = await params;
+  const body = await request.json();
+
+  const wantsNewRange =
+    body.startTime !== undefined || body.endTime !== undefined;
+
+  // P2a: rate limit checado antes de ownership/query/processamento — mas só
+  // quando este PATCH de fato vai disparar ffmpeg (mudança de intervalo).
+  // Um PATCH que só edita o título não consome deste orçamento, que é
+  // compartilhado com a criação de clipe (mesma chave "clip-generation").
+  if (wantsNewRange) {
+    const rateDecision = checkRateLimit(
+      rateLimitKey("clip-generation", session.user.id),
+      RATE_LIMIT_RULES.CLIP_GENERATION
+    );
+
+    if (!rateDecision.allowed) {
+      return rateLimitResponse(rateDecision);
+    }
+  }
 
   const clip = await getOwnedClip(projectId, videoId, clipId, session.user.id);
 
@@ -34,7 +54,6 @@ export async function PATCH(
     );
   }
 
-  const body = await request.json();
   const data: {
     title?: string | null;
     startTime?: number;
@@ -46,9 +65,6 @@ export async function PATCH(
   if (typeof body.title === "string") {
     data.title = body.title.trim().slice(0, MAX_TITLE_LENGTH) || null;
   }
-
-  const wantsNewRange =
-    body.startTime !== undefined || body.endTime !== undefined;
 
   if (wantsNewRange) {
     const startTime = Number(body.startTime ?? clip.startTime);

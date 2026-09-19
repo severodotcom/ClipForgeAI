@@ -4,6 +4,7 @@ import { getAudioDuration } from "@/lib/ffmpeg";
 import { getVideoAbsolutePath, saveVideoFile } from "@/lib/storage";
 import { transcribeVideo } from "@/lib/transcription";
 import { checkQuota, getPeriodStart, lockUserForQuota, recordUsage, type QuotaCheckResult } from "@/lib/usage";
+import { checkRateLimit, rateLimitKey, rateLimitResponse, RATE_LIMIT_RULES } from "@/lib/rate-limit";
 import { UsageType } from "@prisma/client";
 import { headers } from "next/headers";
 
@@ -44,6 +45,18 @@ export async function POST(
       { error: "Não autenticado" },
       { status: 401 }
     );
+  }
+
+  // P2a: rate limit checado logo após autenticar, antes de qualquer
+  // ownership/query/quota/transação — uma requisição que estoura o limite
+  // nunca chega a tocar o banco.
+  const rateDecision = checkRateLimit(
+    rateLimitKey("upload", session.user.id),
+    RATE_LIMIT_RULES.VIDEO_UPLOAD
+  );
+
+  if (!rateDecision.allowed) {
+    return rateLimitResponse(rateDecision);
   }
 
   const { id: projectId } = await params;

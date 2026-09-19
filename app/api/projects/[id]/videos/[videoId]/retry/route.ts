@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { retryVideo } from "@/lib/retry";
+import { checkRateLimit, rateLimitKey, rateLimitResponse, RATE_LIMIT_RULES } from "@/lib/rate-limit";
 import { headers } from "next/headers";
 
 export async function POST(
@@ -15,6 +16,18 @@ export async function POST(
       { error: "Não autenticado" },
       { status: 401 }
     );
+  }
+
+  // P2a: rate limit antes de qualquer ownership/query/transação — inclusive
+  // antes da própria retryVideo, que já é atômica contra corrida mas não
+  // limita a frequência de tentativas.
+  const rateDecision = checkRateLimit(
+    rateLimitKey("video-retry", session.user.id),
+    RATE_LIMIT_RULES.VIDEO_RETRY
+  );
+
+  if (!rateDecision.allowed) {
+    return rateLimitResponse(rateDecision);
   }
 
   const { id: projectId, videoId } = await params;

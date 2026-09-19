@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { retryClip } from "@/lib/retry";
+import { checkRateLimit, rateLimitKey, rateLimitResponse, RATE_LIMIT_RULES } from "@/lib/rate-limit";
 import { headers } from "next/headers";
 
 export async function POST(
@@ -15,6 +16,16 @@ export async function POST(
       { error: "Não autenticado" },
       { status: 401 }
     );
+  }
+
+  // P2a: rate limit antes de qualquer ownership/query/transação.
+  const rateDecision = checkRateLimit(
+    rateLimitKey("clip-retry", session.user.id),
+    RATE_LIMIT_RULES.CLIP_RETRY
+  );
+
+  if (!rateDecision.allowed) {
+    return rateLimitResponse(rateDecision);
   }
 
   const { id: projectId, videoId, clipId } = await params;
