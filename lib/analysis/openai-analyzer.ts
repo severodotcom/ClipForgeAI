@@ -6,6 +6,7 @@ import {
   saveAnalysisCache,
   type AnalysisCacheKey,
 } from "./cache";
+import { dedupeInFlight } from "./inflight";
 
 const DEFAULT_MODEL_ENV_HINT = "OPENAI_MODEL";
 
@@ -256,12 +257,31 @@ export async function runOpenAiAnalysis(
 }
 
 /**
+ * Serializa uma AnalysisCacheKey para uma string única usável como chave do
+ * Map de dedup em lib/analysis/inflight.ts — os mesmos 4 campos que
+ * definem a constraint única de AnalysisCache no Postgres (ver
+ * prisma/schema.prisma), então "mesma análise" tem uma única definição em
+ * todo o sistema.
+ */
+function inFlightKey(key: AnalysisCacheKey): string {
+  return `${key.videoId}::${key.transcriptHash}::${key.model}::${key.analyzerVersion}`;
+}
+
+/**
  * Convenience orchestration of the two functions above, for callers that
  * just want a suggestion list plus metadata without needing to check quota
  * in between (e.g. `analyze()` below, or any standalone/test usage). Not
  * used by the quota-aware path in suggestions/route.ts, which calls
  * `peekCachedSuggestions`/`runOpenAiAnalysis` directly so it can check
  * quota strictly between a confirmed miss and the real network call.
+ *
+ * P2b: a chamada real (runOpenAiAnalysis) passa por dedupeInFlight,
+ * chaveada pela AnalysisCacheKey completa. Duas chamadas concorrentes para
+ * a mesma chave (mesmo vídeo + mesmo hash de transcrição + mesmo modelo +
+ * mesma versão do prompt) compartilham a mesma Promise: só uma delas
+ * realmente chama a OpenAI; a outra espera e recebe o mesmo resultado (ou
+ * o mesmo erro). Ver lib/analysis/inflight.ts para os detalhes de
+ * atomicidade e as limitações de single-instance.
  */
 export async function analyzeWithUsage(
   transcript: TranscriptInput
@@ -282,7 +302,9 @@ export async function analyzeWithUsage(
     };
   }
 
-  const result = await runOpenAiAnalysis(transcript, lookup.cacheKey);
+  const result = await dedupeInFlight(inFlightKey(lookup.cacheKey), () =>
+    runOpenAiAnalysis(transcript, lookup.cacheKey)
+  );
 
   return { ...result, cacheHit: false };
 }

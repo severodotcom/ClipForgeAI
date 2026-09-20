@@ -358,8 +358,7 @@ describe("integração de AI_ANALYSIS (cache + quota + idempotência), provider 
   });
 
   it(
-    "duas requisições concorrentes em cache miss não criam dois UsageRecords " +
-      "(mas isso NÃO garante que a OpenAI só seja chamada uma vez — ver asserção de mockCreate abaixo)",
+    "duas requisições concorrentes em cache miss chamam a OpenAI exatamente uma vez (P2b: dedupeInFlight)",
     async () => {
       await withEphemeralUser("concurrent-miss", async ({ userId, videoId }) => {
         mockCreate.mockResolvedValue(completionOf(SAMPLE_SUGGESTIONS, SAMPLE_USAGE));
@@ -371,13 +370,16 @@ describe("integração de AI_ANALYSIS (cache + quota + idempotência), provider 
           runSuggestionsFlow(userId, transcript),
         ]);
 
-        // Documentado explicitamente (não é um bug): duas requisições
-        // simultâneas em cache miss genuinamente disparam duas chamadas à
-        // OpenAI — o custo real, se isso acontecesse em produção, seria
-        // pago duas vezes. A idempotência (idempotencyKey amarrada ao
-        // mesmo AnalysisCache.id, já que ambas resolvem para a mesma linha
-        // via upsert) só protege a CONTAGEM no ledger, não o custo.
-        expect(mockCreate.mock.calls.length).toBeGreaterThanOrEqual(1);
+        // Antes do P2b, duas requisições simultâneas em cache miss
+        // genuinamente disparavam duas chamadas à OpenAI (custo real pago
+        // em dobro) — só a contagem no ledger ficava correta, via
+        // idempotencyKey amarrada ao mesmo AnalysisCache.id. Agora
+        // analyzeWithUsage (lib/analysis/openai-analyzer.ts) passa a
+        // chamada real por dedupeInFlight (lib/analysis/inflight.ts),
+        // chaveada pela AnalysisCacheKey completa: a segunda requisição
+        // espera a mesma Promise da primeira em vez de chamar a OpenAI de
+        // novo.
+        expect(mockCreate).toHaveBeenCalledTimes(1);
 
         expect(resultA.analysisCacheId).toBe(resultB.analysisCacheId);
 
@@ -385,6 +387,65 @@ describe("integração de AI_ANALYSIS (cache + quota + idempotência), provider 
           where: { userId, type: UsageType.AI_ANALYSIS },
         });
         expect(records).toHaveLength(1);
+      });
+    }
+  );
+
+  it(
+    "duas requisições concorrentes em cache miss recebem o mesmo erro quando a OpenAI falha, " +
+      "e nenhum UsageRecord é criado (P2b)",
+    async () => {
+      await withEphemeralUser("concurrent-miss-error", async ({ userId, videoId }) => {
+        // Chamada mockada controlada manualmente (não `mockRejectedValueOnce`,
+        // que rejeitaria de imediato): a OpenAI real leva segundos mesmo numa
+        // falha de rede, então a rejeição só é disparada depois de dar tempo
+        // real para as duas chamadas concorrentes atravessarem seus próprios
+        // peekCache/checkQuota (leituras reais no Postgres) e convergirem no
+        // mesmo dedupeInFlight. Sem isso, uma rejeição instantânea limparia a
+        // entrada do Map (via finally) antes da segunda chamada sequer
+        // chegar lá, mascarando o dedup com uma 2ª chamada real ao mock.
+        let rejectOpenAiCall!: (error: Error) => void;
+        const openAiCallPromise = new Promise<never>((_, reject) => {
+          rejectOpenAiCall = reject;
+        });
+        mockCreate.mockReturnValueOnce(openAiCallPromise);
+
+        const transcript = makeTranscript(videoId);
+
+        const resultsPromise = Promise.allSettled([
+          runSuggestionsFlow(userId, transcript),
+          runSuggestionsFlow(userId, transcript),
+        ]);
+
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(mockCreate).toHaveBeenCalledTimes(1); // confirma que as duas já convergiram na mesma chamada em voo
+
+        rejectOpenAiCall(new Error("network boom concorrente"));
+
+        const results = await resultsPromise;
+
+        expect(results.every((r) => r.status === "rejected")).toBe(true);
+        const [rejectedA, rejectedB] = results as PromiseRejectedResult[];
+        // Mesma causa raiz para as duas: elas esperaram a MESMA Promise em
+        // voo (só uma chamada real à OpenAI aconteceu), então recebem
+        // literalmente o mesmo erro, não duas falhas independentes.
+        expect((rejectedA.reason as Error).message).toBe((rejectedB.reason as Error).message);
+        expect(mockCreate).toHaveBeenCalledTimes(1);
+
+        const records = await prisma.usageRecord.findMany({
+          where: { userId, type: UsageType.AI_ANALYSIS },
+        });
+        expect(records).toHaveLength(0);
+
+        // A entrada em voo foi removida no finally de dedupeInFlight — uma
+        // nova tentativa (não concorrente) depois da falha consegue chamar
+        // a OpenAI de novo normalmente, não fica presa no erro anterior.
+        mockCreate.mockResolvedValueOnce(completionOf(SAMPLE_SUGGESTIONS, SAMPLE_USAGE));
+        const retryResult = await runSuggestionsFlow(userId, transcript);
+
+        expect(retryResult.cacheHit).toBe(false);
+        expect(retryResult.analysisCacheId).toBeTruthy();
+        expect(mockCreate).toHaveBeenCalledTimes(2);
       });
     }
   );
