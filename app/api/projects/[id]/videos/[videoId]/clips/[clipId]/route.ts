@@ -2,7 +2,7 @@ import { rm } from "node:fs/promises";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateClip } from "@/lib/clips";
-import { getClipAbsolutePath } from "@/lib/storage";
+import { deleteClipFile, getClipAbsolutePath } from "@/lib/storage";
 import { getOwnedClip } from "@/lib/ownership";
 import { checkRateLimit, rateLimitKey, rateLimitResponse, RATE_LIMIT_RULES } from "@/lib/rate-limit";
 import { headers } from "next/headers";
@@ -130,6 +130,17 @@ export async function DELETE(
     );
   }
 
+  // P2g: rate limit antes de ownership/storage/banco — mesmo padrão de
+  // upload/retry/clip-generation (P2a).
+  const rateDecision = checkRateLimit(
+    rateLimitKey("clip-delete", session.user.id),
+    RATE_LIMIT_RULES.CLIP_DELETE
+  );
+
+  if (!rateDecision.allowed) {
+    return rateLimitResponse(rateDecision);
+  }
+
   const { id: projectId, videoId, clipId } = await params;
 
   const clip = await getOwnedClip(projectId, videoId, clipId, session.user.id);
@@ -141,13 +152,65 @@ export async function DELETE(
     );
   }
 
-  if (clip.outputPath) {
-    await rm(getClipAbsolutePath(clip.outputPath), { force: true }).catch(
-      () => {}
+  if (clip.status === "GENERATING") {
+    return Response.json(
+      {
+        error: "O clipe está sendo gerado e não pode ser excluído agora.",
+        code: "CLIP_PROCESSING",
+      },
+      { status: 409 }
     );
   }
 
-  await prisma.clip.delete({ where: { id: clipId } });
+  try {
+    if (clip.outputPath) {
+      await deleteClipFile(clip.outputPath);
+    }
+  } catch (error) {
+    // Erro real de filesystem (não ENOENT) — aborta antes de tocar o
+    // banco; diferente do comportamento anterior, que engolia qualquer
+    // erro de rm() indiscriminadamente.
+    console.error(`Falha ao remover o arquivo físico do clipe ${clipId}:`, error);
+
+    return Response.json(
+      { error: "Falha ao remover o arquivo do clipe" },
+      { status: 500 }
+    );
+  }
+
+  // Exclusão condicional e atômica — mesmo padrão de lib/retry.ts: se o
+  // clipe voltou a GENERATING (ex: retry concorrente) entre a checagem
+  // acima e este delete, count fica 0 e a linha não é apagada.
+  const result = await prisma.clip.deleteMany({
+    where: {
+      id: clipId,
+      videoId,
+      status: { not: "GENERATING" },
+    },
+  });
+
+  if (result.count === 0) {
+    const stillExists = await prisma.clip.findUnique({ where: { id: clipId } });
+
+    if (!stillExists) {
+      return Response.json(
+        { error: "Clipe não encontrado" },
+        { status: 404 }
+      );
+    }
+
+    console.error(
+      `Clipe ${clipId} voltou a GENERATING durante a exclusão; arquivo já removido, linha mantida.`
+    );
+
+    return Response.json(
+      {
+        error: "O clipe entrou em geração durante a exclusão. Tente novamente.",
+        code: "CLIP_PROCESSING",
+      },
+      { status: 409 }
+    );
+  }
 
   return new Response(null, { status: 204 });
 }

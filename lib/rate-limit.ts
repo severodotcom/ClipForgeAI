@@ -154,6 +154,14 @@ export const RATE_LIMIT_RULES = {
   VIDEO_RETRY: { windowMs: 10 * 60 * 1000, max: 5 },
   CLIP_RETRY: { windowMs: 10 * 60 * 1000, max: 5 },
   CLIP_GENERATION: { windowMs: 10 * 60 * 1000, max: 20 },
+  // P2g: exclusão de projeto/vídeo/clipe. PROJECT_DELETE é a mais
+  // destrutiva (cascateia vídeos e clipes de uma vez) e por isso tem o
+  // orçamento mais baixo; VIDEO_DELETE e CLIP_DELETE seguem a mesma ordem
+  // de grandeza de VIDEO_UPLOAD e CLIP_GENERATION, respectivamente — já que
+  // ambas tocam o mesmo storage em disco.
+  PROJECT_DELETE: { windowMs: 10 * 60 * 1000, max: 5 },
+  VIDEO_DELETE: { windowMs: 10 * 60 * 1000, max: 10 },
+  CLIP_DELETE: { windowMs: 10 * 60 * 1000, max: 20 },
 } as const satisfies Record<string, RateLimitRule>;
 
 /**
