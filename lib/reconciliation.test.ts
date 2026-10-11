@@ -56,13 +56,14 @@ describe("reconcileStuckOperations (lib/reconciliation.ts)", () => {
     });
   }
 
-  it("vídeo TRANSCRIBING travado (mais velho que o limite) -> FAILED", async () => {
+  it("vídeo TRANSCRIBING travado (mais velho que o limite) -> FAILED, com errorMessage preenchido (P2h)", async () => {
     const video = await createVideo("TRANSCRIBING", STALE_UPDATED_AT, "stale-transcribing.mp4");
 
     await reconcileStuckOperations(NOW);
 
     const result = await prisma.video.findUniqueOrThrow({ where: { id: video.id } });
     expect(result.status).toBe("FAILED");
+    expect(result.errorMessage).toBeTruthy();
   });
 
   it("vídeo ANALYZING travado (mais velho que o limite) -> FAILED", async () => {
@@ -83,7 +84,7 @@ describe("reconcileStuckOperations (lib/reconciliation.ts)", () => {
     expect(result.status).toBe("FAILED");
   });
 
-  it("clipe GENERATING travado (mais velho que o limite) -> FAILED", async () => {
+  it("clipe GENERATING travado (mais velho que o limite) -> FAILED, com errorMessage preenchido (P2h)", async () => {
     const video = await createVideo("UPLOADED", RECENT_UPDATED_AT, "video-para-clipe-travado.mp4");
     const clip = await createClip(video.id, "GENERATING", STALE_UPDATED_AT);
 
@@ -91,6 +92,7 @@ describe("reconcileStuckOperations (lib/reconciliation.ts)", () => {
 
     const result = await prisma.clip.findUniqueOrThrow({ where: { id: clip.id } });
     expect(result.status).toBe("FAILED");
+    expect(result.errorMessage).toBeTruthy();
   });
 
   it("operações recentes (dentro do limite de idade) NÃO são alteradas", async () => {

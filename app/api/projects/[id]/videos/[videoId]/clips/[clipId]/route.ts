@@ -60,6 +60,7 @@ export async function PATCH(
     endTime?: number;
     status?: "PENDING";
     outputPath?: null;
+    errorMessage?: null;
   } = {};
 
   if (typeof body.title === "string") {
@@ -93,6 +94,10 @@ export async function PATCH(
     data.endTime = endTime;
     data.status = "PENDING";
     data.outputPath = null;
+    // P2h: mesma decisão do retry (lib/retry.ts) — editar o intervalo
+    // dispara reprocessamento, então o erro de uma geração anterior deixa
+    // de ser relevante para o estado atual.
+    data.errorMessage = null;
   }
 
   const updated = await prisma.clip.update({

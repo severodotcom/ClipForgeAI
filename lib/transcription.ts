@@ -8,6 +8,7 @@ import { whisperSemaphore } from "@/lib/concurrency";
 import { getWhisperPipeline } from "@/lib/whisper";
 import { extractAudioWav } from "@/lib/ffmpeg";
 import { getVideoAbsolutePath } from "@/lib/storage";
+import { sanitizeFailureReason } from "@/lib/errors";
 
 type TranscriptSegment = {
   start: number;
@@ -136,14 +137,14 @@ export async function transcribeVideo(videoId: string) {
 
     await prisma.video.update({
       where: { id: videoId },
-      data: { status: "UPLOADED" },
+      data: { status: "UPLOADED", errorMessage: null },
     });
   } catch (error) {
     console.error(`Falha ao transcrever vídeo ${videoId}:`, error);
 
     await prisma.video.update({
       where: { id: videoId },
-      data: { status: "FAILED" },
+      data: { status: "FAILED", errorMessage: sanitizeFailureReason(error) },
     });
   } finally {
     await rm(workDir, { recursive: true, force: true });

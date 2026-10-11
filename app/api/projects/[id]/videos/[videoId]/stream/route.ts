@@ -46,7 +46,34 @@ export async function GET(
   }
 
   const absolutePath = getVideoAbsolutePath(video.storagePath);
-  const { size } = await stat(absolutePath);
+
+  let size: number;
+  try {
+    ({ size } = await stat(absolutePath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // Registro existe no banco (video.storagePath está preenchido), mas
+      // o arquivo físico desapareceu (apagado manualmente, disco externo,
+      // etc.) — distinto de qualquer outro erro de filesystem abaixo.
+      console.error(
+        `Vídeo ${videoId} está registrado no banco mas o arquivo não existe em disco:`,
+        error
+      );
+
+      return Response.json(
+        { error: "O arquivo deste vídeo não está mais disponível.", code: "FILE_NOT_FOUND" },
+        { status: 404 }
+      );
+    }
+
+    console.error(`Falha ao acessar o arquivo do vídeo ${videoId}:`, error);
+
+    return Response.json(
+      { error: "Falha ao acessar o arquivo do vídeo" },
+      { status: 500 }
+    );
+  }
+
   const contentType = guessMimeType(video.originalFilename);
   const range = request.headers.get("range");
 

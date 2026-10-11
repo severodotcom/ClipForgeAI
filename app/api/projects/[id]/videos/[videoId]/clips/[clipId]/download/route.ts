@@ -42,7 +42,34 @@ export async function GET(
   }
 
   const absolutePath = getClipAbsolutePath(clip.outputPath);
-  const { size } = await stat(absolutePath);
+
+  let size: number;
+  try {
+    ({ size } = await stat(absolutePath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // Registro existe e diz COMPLETED (clip.outputPath preenchido), mas
+      // o arquivo físico desapareceu — distinto de qualquer outro erro de
+      // filesystem abaixo.
+      console.error(
+        `Clipe ${clipId} está marcado como COMPLETED mas o arquivo não existe em disco:`,
+        error
+      );
+
+      return Response.json(
+        { error: "O arquivo deste clipe não está mais disponível.", code: "FILE_NOT_FOUND" },
+        { status: 404 }
+      );
+    }
+
+    console.error(`Falha ao acessar o arquivo do clipe ${clipId}:`, error);
+
+    return Response.json(
+      { error: "Falha ao acessar o arquivo do clipe" },
+      { status: 500 }
+    );
+  }
+
   const safeFilename = (clip.title || clip.id).replace(/[^a-zA-Z0-9.\-_ ]/g, "_");
   const range = request.headers.get("range");
 

@@ -35,6 +35,16 @@ export const RECONCILE_STALE_AFTER_MS =
 const STUCK_VIDEO_STATUSES: VideoStatus[] = ["TRANSCRIBING", "ANALYZING", "GENERATING"];
 const STUCK_CLIP_STATUSES: ClipStatus[] = ["GENERATING"];
 
+// Motivo persistido em errorMessage para recursos marcados FAILED por esta
+// reconciliação (não por uma exceção capturada no próprio job) — sem isto,
+// o campo ficaria null (nunca tendo falhado "de verdade" antes) ou, pior,
+// com um errorMessage de uma falha anterior já resolvida por um retry que
+// nunca chegou a terminar, o que seria enganoso. Mesmo texto para todas as
+// linhas afetadas por uma mesma execução, já que é um updateMany em lote,
+// não uma causa individual por linha.
+const RECONCILIATION_FAILURE_REASON =
+  "Processamento interrompido: a operação ficou presa além do tempo limite de reconciliação e foi marcada como falha.";
+
 export type ReconciliationResult = {
   videosMarkedFailed: number;
   clipsMarkedFailed: number;
@@ -56,14 +66,14 @@ export async function reconcileStuckOperations(now: Date = new Date()): Promise<
         status: { in: STUCK_VIDEO_STATUSES },
         updatedAt: { lt: staleBefore },
       },
-      data: { status: "FAILED" },
+      data: { status: "FAILED", errorMessage: RECONCILIATION_FAILURE_REASON },
     }),
     prisma.clip.updateMany({
       where: {
         status: { in: STUCK_CLIP_STATUSES },
         updatedAt: { lt: staleBefore },
       },
-      data: { status: "FAILED" },
+      data: { status: "FAILED", errorMessage: RECONCILIATION_FAILURE_REASON },
     }),
   ]);
 

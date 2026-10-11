@@ -19,6 +19,15 @@ import type { Clip, Video } from "@prisma/client";
 // aqui para o mesmo recurso, no máximo uma terá `count === 1`; as demais
 // verão `count === 0` porque a linha já não estava mais FAILED no momento
 // em que a própria UPDATE foi avaliada.
+//
+// P2h: a mesma transição já limpa `errorMessage` (-> null) — decisão
+// deliberada, não um descuido: ao reiniciar o processamento, o motivo da
+// falha anterior deixa de ser relevante para o estado atual do recurso
+// (ele não está mais FAILED, está reprocessando). Se o reprocessamento
+// falhar de novo, o catch de transcribeVideo/generateClip grava um
+// errorMessage novo, referente a esta tentativa. Isto evita a UI mostrar
+// um erro "fantasma" de uma tentativa anterior enquanto o recurso já está
+// de volta a TRANSCRIBING/GENERATING.
 export type RetryVideoResult =
   | { outcome: "not_found" }
   | { outcome: "not_failed"; video: Video }
@@ -54,7 +63,7 @@ export async function retryVideo(
 
   const result = await prisma.video.updateMany({
     where: { id: videoId, status: "FAILED" },
-    data: { status: "TRANSCRIBING" },
+    data: { status: "TRANSCRIBING", errorMessage: null },
   });
 
   if (result.count === 0) {
@@ -91,7 +100,7 @@ export async function retryClip(
 
   const result = await prisma.clip.updateMany({
     where: { id: clipId, status: "FAILED" },
-    data: { status: "GENERATING" },
+    data: { status: "GENERATING", errorMessage: null },
   });
 
   if (result.count === 0) {

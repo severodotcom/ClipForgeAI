@@ -86,6 +86,11 @@ model Video {
   storagePath      String?
   duration         Float?
   status           VideoStatus @default(UPLOADING)
+  /// Causa da falha mais recente (sanitizada por lib/errors.ts — nunca
+  /// stack trace, nunca secret, tamanho limitado), quando status = FAILED.
+  /// Limpa (null) ao reiniciar processamento com sucesso ou via retry — ver
+  /// lib/transcription.ts, lib/retry.ts e lib/reconciliation.ts.
+  errorMessage     String?
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
@@ -106,17 +111,20 @@ model Transcription {
 }
 
 model Clip {
-  id         String     @id @default(cuid())
-  videoId    String
-  startTime  Float
-  endTime    Float
-  score      Float?
-  reason     String?
-  title      String?
-  status     ClipStatus @default(PENDING)
-  outputPath String?
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  id           String     @id @default(cuid())
+  videoId      String
+  startTime    Float
+  endTime      Float
+  score        Float?
+  reason       String?
+  title        String?
+  status       ClipStatus @default(PENDING)
+  outputPath   String?
+  /// Mesmo propósito de Video.errorMessage, para falhas de geração do
+  /// clipe (ffmpeg).
+  errorMessage String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
   video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
 }

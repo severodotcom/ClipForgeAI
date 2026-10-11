@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { clipSemaphore } from "@/lib/concurrency";
 import { extractClip } from "@/lib/ffmpeg";
 import { getVideoAbsolutePath, prepareClipOutputPath } from "@/lib/storage";
+import { sanitizeFailureReason } from "@/lib/errors";
 
 export async function generateClip(clipId: string) {
   const clip = await prisma.clip.findUnique({
@@ -35,14 +36,14 @@ export async function generateClip(clipId: string) {
 
     await prisma.clip.update({
       where: { id: clipId },
-      data: { status: "COMPLETED", outputPath: relativePath },
+      data: { status: "COMPLETED", outputPath: relativePath, errorMessage: null },
     });
   } catch (error) {
     console.error(`Falha ao gerar o clipe ${clipId}:`, error);
 
     await prisma.clip.update({
       where: { id: clipId },
-      data: { status: "FAILED" },
+      data: { status: "FAILED", errorMessage: sanitizeFailureReason(error) },
     });
   }
 }

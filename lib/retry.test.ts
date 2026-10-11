@@ -105,6 +105,52 @@ describe("retryVideo / retryClip (lib/retry.ts)", () => {
     }
   });
 
+  // P2h: decisão explícita de limpar errorMessage ao iniciar um novo
+  // processamento — asserta sobre o objeto retornado por retryVideo/
+  // retryClip (lido pela própria função ANTES de disparar
+  // transcribeVideo/generateClip em fire-and-forget), não por uma query
+  // própria depois, para não competir com o job de background que o
+  // comentário no topo deste arquivo já documenta como não determinístico.
+  it("1b. retry de vídeo limpa o errorMessage da falha anterior ao reiniciar o processamento", async () => {
+    const video = await prisma.video.create({
+      data: {
+        projectId,
+        originalFilename: "video.mp4",
+        status: "FAILED",
+        storagePath: "videos/fake.mp4",
+        duration: 60,
+        errorMessage: "erro simulado da tentativa anterior",
+      },
+    });
+
+    const result = await retryVideo(projectId, video.id, userId);
+
+    expect(result.outcome).toBe("started");
+    if (result.outcome === "started") {
+      expect(result.video.errorMessage).toBeNull();
+    }
+  });
+
+  it("2b. retry de clip limpa o errorMessage da falha anterior ao reiniciar o processamento", async () => {
+    const video = await createVideo("COMPLETED");
+    const clip = await prisma.clip.create({
+      data: {
+        videoId: video.id,
+        startTime: 0,
+        endTime: 10,
+        status: "FAILED",
+        errorMessage: "erro simulado da tentativa anterior",
+      },
+    });
+
+    const result = await retryClip(projectId, video.id, clip.id, userId);
+
+    expect(result.outcome).toBe("started");
+    if (result.outcome === "started") {
+      expect(result.clip.errorMessage).toBeNull();
+    }
+  });
+
   it("3. retry de vídeo COMPLETED é rejeitado (not_failed), status não muda", async () => {
     const video = await createVideo("COMPLETED");
 

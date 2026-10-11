@@ -5,11 +5,11 @@ import { spawn } from "node:child_process";
 // large/slow files; the default covers ffprobe (near-instant), audio
 // extraction (roughly real-time) and clip re-encoding (short segments) with
 // comfortable margin.
-const DEFAULT_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS) || 10 * 60 * 1000;
+export const DEFAULT_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS) || 10 * 60 * 1000;
 
 // Grace period after SIGTERM before escalating to SIGKILL, for a process
 // that ignores/can't act on the polite signal.
-const SIGKILL_GRACE_MS = 5000;
+export const SIGKILL_GRACE_MS = 5000;
 
 function runCommand(
   command: string,

@@ -288,6 +288,13 @@ function VideoCard({
         )}
       </p>
 
+      {/* video.errorMessage já é sanitizado no servidor (lib/errors.ts) —
+          sem stack trace, sem path interno, sem secret — seguro para
+          exibir como texto puro (P2h). */}
+      {video.status === "FAILED" && video.errorMessage && (
+        <p className="mt-1 text-xs text-gray-400">{video.errorMessage}</p>
+      )}
+
       {video.storagePath && (
         <video
           ref={videoRef}
@@ -518,6 +525,13 @@ function VideoCard({
                         {clip.score != null && `Score ${Math.round(clip.score)}/100 · `}
                         {clip.reason}
                       </p>
+                    )}
+
+                    {/* clip.errorMessage já é sanitizado no servidor
+                        (lib/errors.ts) — seguro para exibir como texto
+                        puro (P2h). */}
+                    {clip.status === "FAILED" && clip.errorMessage && (
+                      <p className="text-xs text-gray-400">{clip.errorMessage}</p>
                     )}
                   </div>
 

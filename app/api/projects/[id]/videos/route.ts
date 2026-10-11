@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getAudioDuration } from "@/lib/ffmpeg";
 import { getVideoAbsolutePath, saveVideoFile } from "@/lib/storage";
 import { transcribeVideo } from "@/lib/transcription";
+import { sanitizeFailureReason } from "@/lib/errors";
 import { checkQuota, getPeriodStart, lockUserForQuota, recordUsage, type QuotaCheckResult } from "@/lib/usage";
 import { checkRateLimit, rateLimitKey, rateLimitResponse, RATE_LIMIT_RULES } from "@/lib/rate-limit";
 import { UsageType } from "@prisma/client";
@@ -163,7 +164,7 @@ export async function POST(
 
       await prisma.video.update({
         where: { id: video.id },
-        data: { storagePath, status: "FAILED" },
+        data: { storagePath, status: "FAILED", errorMessage: sanitizeFailureReason(probeError) },
       });
 
       return Response.json(
@@ -229,7 +230,7 @@ export async function POST(
 
     await prisma.video.update({
       where: { id: video.id },
-      data: { status: "FAILED" },
+      data: { status: "FAILED", errorMessage: sanitizeFailureReason(error) },
     });
 
     return Response.json(
