@@ -39,6 +39,16 @@ RUN node scripts/warm-whisper-model.mjs
 RUN npm run build
 
 
+# Prisma CLI + its full dependency closure (incl. the schema-engine binary
+# and the `dotenv` that prisma.config.ts imports), derived from
+# package-lock.json and copied as-is from the deps install. Needed so the
+# runner can execute `npx prisma migrate deploy` as Render's pre-deploy
+# command; the app itself never loads any of it.
+FROM deps AS prisma-cli
+COPY scripts/collect-prisma-cli.mjs ./scripts/
+RUN node scripts/collect-prisma-cli.mjs /prisma-cli
+
+
 FROM node:24-bookworm-slim AS runner
 WORKDIR /app
 
@@ -66,13 +76,15 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 # Prisma CLI + schema/migrations, so the same image can also run
-# `npx prisma migrate deploy` / `npx prisma db seed` as Render's release
-# command (documented separately — not executed by this image's default
-# CMD, and no migration is run as part of this build).
+# `npx prisma migrate deploy` as Render's pre-deploy command (not executed
+# by this image's default CMD, and no migration is run as part of this
+# build). The CLI tree is overlaid on the standalone node_modules; the few
+# packages both contain (react, react-dom, scheduler) come from the same
+# lockfile, so the overlay doesn't change what the app loads. Copying a
+# directory keeps node_modules/.bin/prisma a symlink.
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.ts
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
+COPY --from=prisma-cli --chown=nextjs:nodejs /prisma-cli/node_modules ./node_modules
 
 # Local video/clip storage. In production this path should be a Render
 # Disk mount (see the deployment report) — creating it here only keeps
