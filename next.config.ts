@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
-const contentSecurityPolicy = [
+// CSP estática das rotas de API. As páginas recebem uma CSP com nonce por
+// request em proxy.ts (ver lib/csp.ts); as duas não podem se sobrepor, pois o
+// navegador aplicaria ambas e a estática bloquearia os scripts com nonce.
+const apiContentSecurityPolicy = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
@@ -34,7 +37,12 @@ const nextConfig: NextConfig = {
             key: "Permissions-Policy",
             value: "camera=(), microphone=()",
           },
-          { key: "Content-Security-Policy", value: contentSecurityPolicy },
+        ],
+      },
+      {
+        source: "/api/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: apiContentSecurityPolicy },
         ],
       },
     ];

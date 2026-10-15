@@ -13,10 +13,11 @@ function findHeader(headers: { key: string; value: string }[], key: string) {
 }
 
 describe("security headers (next.config.ts)", () => {
-  it("aplica as regras a todas as rotas via source '/:path*'", async () => {
+  it("aplica as regras a todas as rotas via source '/:path*' e a CSP de API em '/api/:path*'", async () => {
     const rules = await getHeaderRules();
-    expect(rules).toHaveLength(1);
+    expect(rules).toHaveLength(2);
     expect(rules[0].source).toBe("/:path*");
+    expect(rules[1].source).toBe("/api/:path*");
   });
 
   it("define X-Content-Type-Options: nosniff", async () => {
@@ -45,9 +46,15 @@ describe("security headers (next.config.ts)", () => {
     );
   });
 
-  it("define a Content-Security-Policy completa", async () => {
+  it("não define CSP estática em '/:path*' (páginas recebem CSP com nonce via proxy.ts)", async () => {
     const [rule] = await getHeaderRules();
-    const csp = findHeader(rule.headers, "Content-Security-Policy")?.value;
+    expect(findHeader(rule.headers, "Content-Security-Policy")).toBeUndefined();
+  });
+
+  it("define a Content-Security-Policy completa nas rotas de API", async () => {
+    const [, apiRule] = await getHeaderRules();
+    expect(apiRule.headers).toHaveLength(1);
+    const csp = findHeader(apiRule.headers, "Content-Security-Policy")?.value;
 
     expect(csp).toBeDefined();
     expect(csp).toBe(
