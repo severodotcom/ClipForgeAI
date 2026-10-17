@@ -39,11 +39,12 @@ RUN node scripts/warm-whisper-model.mjs
 RUN npm run build
 
 
-# Prisma CLI + its full dependency closure (incl. the schema-engine binary
-# and the `dotenv` that prisma.config.ts imports), derived from
-# package-lock.json and copied as-is from the deps install. Needed so the
-# runner can execute `npx prisma migrate deploy` as Render's pre-deploy
-# command; the app itself never loads any of it.
+# Prisma CLI + its full dependency closure (incl. the schema-engine binary,
+# the `dotenv` that prisma.config.ts imports and the @prisma/adapter-pg that
+# prisma/seed.mjs imports), derived from package-lock.json and copied as-is
+# from the deps install. Needed so the runner can execute `npx prisma
+# migrate deploy` as Render's pre-deploy command and `npx prisma db seed`
+# from a shell; the app itself never loads any of it.
 FROM deps AS prisma-cli
 COPY scripts/collect-prisma-cli.mjs ./scripts/
 RUN node scripts/collect-prisma-cli.mjs /prisma-cli

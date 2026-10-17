@@ -1,10 +1,13 @@
 // Copies the Prisma CLI and everything it needs at runtime into a
 // standalone node_modules tree, so the production image can run
-// `npx prisma migrate deploy` as Render's pre-deploy command.
+// `npx prisma migrate deploy` as Render's pre-deploy command and
+// `npx prisma db seed` from a Render shell.
 //
 // The Next.js standalone output only traces what the *app* imports
 // (@prisma/client, pg, ...) — not the CLI, its ~130 transitive packages,
-// the schema-engine binary, or the `dotenv` that prisma.config.ts imports.
+// the schema-engine binary, the `dotenv` that prisma.config.ts imports, or
+// the @prisma/adapter-pg that prisma/seed.mjs imports (the app bundles the
+// adapter into its server chunks, so it isn't in .next/standalone).
 // This script derives that closure from package-lock.json (no hardcoded
 // package list) and copies it from the already-installed node_modules, so
 // the result is byte-identical to what `npm ci` produced in the deps stage
@@ -18,7 +21,7 @@
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 
-const ROOTS = ["prisma", "dotenv"];
+const ROOTS = ["prisma", "dotenv", "@prisma/adapter-pg"];
 
 const outDir = process.argv[2];
 if (!outDir) {
